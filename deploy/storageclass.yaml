@@ -4,6 +4,6 @@ metadata:
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
   name: storage-csi
-provisioner: csi-storageplugin
+provisioner: csi-storage
 parameters:
   archiveOnDelete: "false"

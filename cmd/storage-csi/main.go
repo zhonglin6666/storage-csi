@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 
 	"storage-csi/pkg/core"

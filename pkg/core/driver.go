@@ -22,14 +22,14 @@ import (
 )
 
 type driver struct {
-	name      string
-	nodeID    string
-	endpoint  string
-	version   string
+	name     string
+	nodeID   string
+	endpoint string
+	version  string
 
-	ids   *identityServer
-	ns    *nodeServer
-	cs    *ControllerServer
+	ids *identityServer
+	ns  *nodeServer
+	cs  *ControllerServer
 
 	cap   []*csi.VolumeCapability_AccessMode
 	cscap []*csi.ControllerServiceCapability
@@ -47,9 +47,10 @@ func NewDriver(nodeID, endpoint string) *driver {
 	glog.Infof("Driver: %v version: %v", driverName, version)
 
 	d := &driver{
-		nodeID: nodeID,
+		name:     driverName,
+		nodeID:   nodeID,
 		endpoint: endpoint,
-
+		version:  version,
 	}
 
 	return d

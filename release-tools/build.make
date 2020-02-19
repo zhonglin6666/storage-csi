@@ -33,7 +33,7 @@ REV=$(shell git describe --long --tags --match='v*' --dirty 2>/dev/null || git r
 
 # A space-separated list of image tags under which the current build is to be pushed.
 # Determined dynamically.
-IMAGE_TAGS=
+IMAGE_TAGS=v1.0.0
 
 # A "canary" image gets built if the current commit is the head of the remote "master" branch.
 # That branch does not exist when building some other branch in TravisCI.

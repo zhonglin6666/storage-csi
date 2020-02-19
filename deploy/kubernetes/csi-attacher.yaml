@@ -17,13 +17,16 @@ spec:
 
 ---
 kind: StatefulSet
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 metadata:
   name: csi-attacher-plugin
   namespace: kube-csi
 spec:
-  serviceName: "csi-attacher"
+  serviceName: "csi-attacher-plugin"
   replicas: 1
+  selector:
+    matchLabels:
+      app: csi-attacher-plugin
   template:
     metadata:
       labels:
@@ -63,7 +66,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: zhangzhonglin/storage-csi:v1.0.0
+          image: storage-csi:latest
           args :
             - "--nodeid=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -78,8 +81,6 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /plugin
-            - name: nfs-server
-              mountPath: /persistentvolumes
       volumes:
         - name: socket-dir
           emptyDir:

@@ -13,4 +13,12 @@ require (
 	github.com/zhonglin6666/kube-nfs-csi v0.0.0-20190606070822-458b4c8de4d8
 	golang.org/x/net v0.0.0-20200202094626-16171245cfb2
 	google.golang.org/grpc v1.27.1
+	k8s.io/api v0.17.0
+	k8s.io/apiextensions-apiserver v0.0.0-20191015221719-7d47edc353ef
+	k8s.io/apimachinery v0.17.1-beta.0
+	k8s.io/apiserver v0.0.0-20191015220424-a5d070e3855f // indirect
+	k8s.io/client-go v0.17.0
+	k8s.io/cloud-provider v0.0.0-20191004111010-9775d7be8494 // indirect
+	k8s.io/kubernetes v1.14.8
+	k8s.io/utils v0.0.0-20191114184206-e782cd3c129f
 )
