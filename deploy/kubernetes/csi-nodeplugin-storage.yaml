@@ -48,6 +48,7 @@ spec:
           args :
             - "--nodeid=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"
+            - "--manager-url=$(MANAGER_URL)"
           env:
             - name: NODE_ID
               valueFrom:
@@ -55,6 +56,8 @@ spec:
                   fieldPath: spec.nodeName
             - name: CSI_ENDPOINT
               value: unix://plugin/csi.sock
+            - name: MANAGER_URL
+              value: "http://127.0.0.1:8800"
           imagePullPolicy: "IfNotPresent"
           volumeMounts:
             - name: plugin-dir
@@ -62,7 +65,6 @@ spec:
             - name: pods-mount-dir
               mountPath: /var/lib/kubelet/pods
               mountPropagation: "Bidirectional"
-
       volumes:
         - name: plugin-dir
           hostPath:

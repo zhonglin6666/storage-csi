@@ -17,9 +17,7 @@ limitations under the License.
 package core
 
 import (
-	"os"
-	"path/filepath"
-
+	"fmt"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/glog"
 	"github.com/kubernetes-csi/csi-lib-utils/protosanitizer"
@@ -33,14 +31,18 @@ const (
 	oneGB = 1073741824
 
 	mountPath = "/persistentvolumes"
+
+	httpMethodPost   = "POST"
+	httpMethodDelete = "DELETE"
 )
 
 type ControllerServer struct {
-	nodeID string
-	caps   []*csi.ControllerServiceCapability
+	managerURL string
+	nodeID     string
+	caps       []*csi.ControllerServiceCapability
 }
 
-type nfsVolume struct {
+type volume struct {
 	VolName            string `json:"volName"`
 	VolID              string `json:"volID"`
 	ArchiveOnDelete    string `json:"archiveOnDelete"`
@@ -53,9 +55,10 @@ type nfsVolume struct {
 	ClusterID          string `json:"clusterId"`
 }
 
-func NewControllerServer(nodeID string) *ControllerServer {
+func NewControllerServer(nodeID, managerURL string) *ControllerServer {
 	return &ControllerServer{
-		nodeID: nodeID,
+		managerURL: managerURL,
+		nodeID:     nodeID,
 		caps: addControllerServiceCapabilities(
 			[]csi.ControllerServiceCapability_RPC_Type{
 				csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
@@ -67,165 +70,68 @@ func NewControllerServer(nodeID string) *ControllerServer {
 	}
 }
 
-func (cs *ControllerServer) validateVolumeReq(req *csi.CreateVolumeRequest) error {
+func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	glog.Infof("controller server create volume begin request: %v", req)
 	if err := cs.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
 		glog.Infof("invalid create volume req: %v", protosanitizer.StripSecrets(req))
-		return err
+		return nil, err
 	}
 	// Check sanity of request Name, Volume Capabilities
 	if len(req.Name) == 0 {
-		return status.Error(codes.InvalidArgument, "Volume Name cannot be empty")
+		return nil, status.Error(codes.InvalidArgument, "Volume Name cannot be empty")
 	}
 	if req.VolumeCapabilities == nil {
-		return status.Error(codes.InvalidArgument, "Volume Capabilities cannot be empty")
-	}
-	return nil
-}
-
-func (cs *ControllerServer) validateControllerServiceRequest(c csi.ControllerServiceCapability_RPC_Type) error {
-	if c == csi.ControllerServiceCapability_RPC_UNKNOWN {
-		return nil
+		return nil, status.Error(codes.InvalidArgument, "Volume Capabilities cannot be empty")
 	}
 
-	for _, cap := range cs.caps {
-		if c == cap.GetRpc().GetType() {
-			return nil
-		}
-	}
-	return status.Errorf(codes.InvalidArgument, "unsupported capability %s", c)
-}
-
-func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	glog.Infof("controller server create volume begin request: %v", req)
-	if err := cs.validateVolumeReq(req); err != nil {
-		return nil, err
-	}
-
-	//util.VolumeNameMutex.LockKey(req.GetName())
-	//defer func() {
-	//	if err := util.VolumeNameMutex.UnlockKey(req.GetName()); err != nil {
-	//		glog.Warningf("failed to unlock mutex volume:%s %v", req.GetName(), err)
-	//	}
-	//}()
-
-	nfsVol, err := parseVolCreateRequest(req)
+	vol, err := parseVolCreateRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
 	volumeContext := req.GetParameters()
-
-	//if _, ok := volumeContext["share"]; ok {
-	//	volumeContext["share"] = fmt.Sprintf("%s/%s", nfsVol.Share, nfsVol.VolID)
-	//}
+	body := map[string]interface{}{
+		"volumeID":   vol.VolID,
+		"volumeName": vol.VolName,
+		"volumeSize": vol.VolSize,
+	}
 	glog.Infof("create volume success, volumeContext: %v", volumeContext)
+
+	path := fmt.Sprintf("/volumes/%s", vol.VolID)
+	if err = sendRequest(httpMethodPost, cs.managerURL, path, body, nil); err != nil {
+		return nil, err
+	}
+	glog.Infof("Succeed to create volume, id: %s, name: %s, size: %d", vol.VolID, vol.VolName, vol.VolSize)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      nfsVol.VolID,
-			CapacityBytes: nfsVol.VolSize,
-			VolumeContext: req.GetParameters(),
+			VolumeId:      vol.VolID,
+			CapacityBytes: vol.VolSize,
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }
 
-func parseVolCreateRequest(req *csi.CreateVolumeRequest) (*nfsVolume, error) {
-	nfsVol, err := getnfsVolumeOptions(req.GetParameters(), true)
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	// Generating Volume Name and Volume ID, as according to CSI spec they MUST be different
-	nfsVol.VolName = req.GetName()
-	volumeID := "csi-nfs-vol-" + uuid.NewUUID().String()
-	nfsVol.VolID = volumeID
-	// Volume Size - Default is 1 GiB
-	volSizeBytes := int64(oneGB)
-	if req.GetCapacityRange() != nil {
-		volSizeBytes = req.GetCapacityRange().GetRequiredBytes()
-	}
-
-	nfsVol.VolSize = volSizeBytes
-
-	return nfsVol, nil
-}
-
-func getnfsVolumeOptions(volOptions map[string]string, disableInUseChecks bool) (*nfsVolume, error) {
-	//var (
-	//	ok bool
-	//)
-
-	nfsVol := &nfsVolume{}
-	//nfsVol.Server, ok = volOptions["server"]
-	//if !ok {
-	//	return nil, errors.New("missing required parameter pool")
-	//}
-	//
-	//nfsVol.Share, ok = volOptions["share"]
-	//if !ok {
-	//	return nil, errors.New("missing required parameter share")
-	//}
-	//
-	//nfsVol.ArchiveOnDelete, ok = volOptions["volOptions"]
-	//if !ok {
-	//	nfsVol.ArchiveOnDelete = "false"
-	//}
-
-	return nfsVol, nil
-}
-
 // DeleteVolume deletes the volume in backend
 func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-	//glog.Infof("DeleteVolume req: %v", req.VolumeId)
-	//if err := cs.Driver.ValidateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
-	//	glog.Warningf("invalid delete volume req: %v", protosanitizer.StripSecrets(req))
-	//	return nil, err
-	//}
-	//// For now the image get unconditionally deleted, but here retention policy can be checked
-	volumeID := req.GetVolumeId()
-	//util.VolumeNameMutex.LockKey(volumeID)
-	//
-	//if volumeID == "" {
-	//	return nil, errors.New("volume id is nil")
-	//}
-	//
-	//defer func() {
-	//	if err := util.VolumeNameMutex.UnlockKey(volumeID); err != nil {
-	//		glog.Warningf("failed to unlock mutex volume:%s %v", volumeID, err)
-	//	}
-	//}()
-
-	nfsVol := &nfsVolume{}
-	volName := nfsVol.VolName
-	fullPath := filepath.Join(mountPath, volumeID)
-
-	//mounter := mount.New("")
-	//err := mounter.Mount(fmt.Sprintf("%v:%v", nfsVol.Server, nfsVol.Share), mountPath, "nfs", nil)
-	//if err != nil {
-	//	if os.IsPermission(err) {
-	//		return nil, status.Error(codes.PermissionDenied, err.Error())
-	//	}
-	//	if strings.Contains(err.Error(), "invalid argument") {
-	//		return nil, status.Error(codes.InvalidArgument, err.Error())
-	//	}
-	//	return nil, status.Error(codes.Internal, err.Error())
-	//}
-	//
-	//defer func() {
-	//	err = mount.CleanupMountPoint(mountPath, mounter, false)
-	//	if err != nil {
-	//		glog.Errorf("umount %v error: %v", mountPath, err)
-	//	}
-	//}()
-
-	glog.Infof("deleting volume %s path: %v", volName, fullPath)
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		glog.Warningf("path %s does not exist, deletion skipped", fullPath)
-		return nil, nil
+	glog.Infof("DeleteVolume req: %v", req.VolumeId)
+	if err := cs.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
+		glog.Warningf("invalid delete volume req: %v", protosanitizer.StripSecrets(req))
+		return nil, err
 	}
 
-	if err := os.RemoveAll(fullPath); err != nil {
-		glog.Error("nfs volume can not remove path: %v", fullPath)
+	//// For now the image get unconditionally deleted, but here retention policy can be checked
+	volumeID := req.GetVolumeId()
+	if volumeID == "" {
+		return nil, fmt.Errorf("volume id is nil")
+	}
+
+	body := map[string]interface{}{
+		"volumeID": volumeID,
+	}
+	path := fmt.Sprintf("/volumes/%s", volumeID)
+	if err := sendRequest(httpMethodDelete, cs.managerURL, path, body, nil); err != nil {
+		return nil, err
 	}
 
 	return &csi.DeleteVolumeResponse{}, nil
@@ -287,4 +193,53 @@ func addControllerServiceCapabilities(caps []csi.ControllerServiceCapability_RPC
 		})
 	}
 	return cscs
+}
+
+func parseVolCreateRequest(req *csi.CreateVolumeRequest) (*volume, error) {
+	vol, err := getnfsVolumeOptions(req.GetParameters(), true)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	// Generating Volume Name and Volume ID, as according to CSI spec they MUST be different
+	vol.VolName = req.GetName()
+	volumeID := "csi-vol-" + uuid.NewUUID().String()
+	vol.VolID = volumeID
+	// Volume Size - Default is 1 GiB
+	volSizeBytes := int64(oneGB)
+	if req.GetCapacityRange() != nil {
+		volSizeBytes = req.GetCapacityRange().GetRequiredBytes()
+	}
+
+	vol.VolSize = volSizeBytes
+
+	return vol, nil
+}
+
+func getnfsVolumeOptions(volOptions map[string]string, disableInUseChecks bool) (*volume, error) {
+	var (
+		ok bool
+	)
+
+	vol := &volume{}
+
+	vol.ArchiveOnDelete, ok = volOptions["volOptions"]
+	if !ok {
+		vol.ArchiveOnDelete = "false"
+	}
+
+	return vol, nil
+}
+
+func (cs *ControllerServer) validateControllerServiceRequest(c csi.ControllerServiceCapability_RPC_Type) error {
+	if c == csi.ControllerServiceCapability_RPC_UNKNOWN {
+		return nil
+	}
+
+	for _, cap := range cs.caps {
+		if c == cap.GetRpc().GetType() {
+			return nil
+		}
+	}
+	return status.Errorf(codes.InvalidArgument, "unsupported capability %s", c)
 }

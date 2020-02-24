@@ -17,82 +17,72 @@ limitations under the License.
 package core
 
 import (
+	"fmt"
+	"net/http"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/glog"
 	"golang.org/x/net/context"
+
+	"storage-csi/pkg/util"
 )
 
 type nodeServer struct {
-	nodeID string
-
+	nodeID     string
+	version    string
+	managerURL string
 	//mounter mount.Interface
+}
+
+func NewNodeServer(nodeID, version, managerURL string) *nodeServer {
+	return &nodeServer{
+		version:    version,
+		managerURL: managerURL,
+		nodeID:     nodeID,
+	}
 }
 
 func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	glog.Infof("zzlin NodePublishVolume begin... req: %#v", req)
 	targetPath := req.GetTargetPath()
-	//notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-	//if err != nil {
-	//	if os.IsNotExist(err) {
-	//		if err := os.MkdirAll(targetPath, 0750); err != nil {
-	//			return nil, status.Error(codes.Internal, err.Error())
-	//		}
-	//		notMnt = true
-	//	} else {
-	//		return nil, status.Error(codes.Internal, err.Error())
-	//	}
-	//}
-	//
-	//if !notMnt {
-	//	return &csi.NodePublishVolumeResponse{}, nil
-	//}
-	//
-	//mo := req.GetVolumeCapability().GetMount().GetMountFlags()
-	//if req.GetReadonly() {
-	//	mo = append(mo, "ro")
-	//}
-	//
-	//s := req.GetVolumeContext()["server"]
-	//ep := req.GetVolumeContext()["share"]
-	//source := fmt.Sprintf("%s:%s", s, ep)
-	//glog.Info("zzlin publish volume target: %v  server: %v", source)
-	//
-	//mounter := mount.New("")
-	//err = mounter.Mount(source, targetPath, "nfs", mo)
-	//if err != nil {
-	//	if os.IsPermission(err) {
-	//		return nil, status.Error(codes.PermissionDenied, err.Error())
-	//	}
-	//	if strings.Contains(err.Error(), "invalid argument") {
-	//		return nil, status.Error(codes.InvalidArgument, err.Error())
-	//	}
-	//	return nil, status.Error(codes.Internal, err.Error())
-	//}
+	volumeID := req.GetVolumeId()
+	body := makeNodeVolumeRequestBody(targetPath)
+	path := fmt.Sprintf("/volumes/%s/mount", volumeID)
+
+	if err := sendRequest(httpMethodPost, ns.managerURL, path, body, nil); err != nil {
+		return &csi.NodePublishVolumeResponse{}, err
+	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
+func sendRequest(method, baseURL, path string, body interface{}, header map[string]string) error {
+	_, code, err := util.Request(method, baseURL, path, body, header)
+	glog.Infof("Send request to %s:%s, code: %d, err: %v", baseURL, path, code, err)
+	if err != nil || code != http.StatusOK {
+		return fmt.Errorf("send request code: %d error: %v", code, err)
+	}
+	return nil
+}
+
 func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	glog.Infof("zzlin NodeUnpublishVolume begin...")
-	//targetPath := req.GetTargetPath()
-	//notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-	//if err != nil {
-	//	if os.IsNotExist(err) {
-	//		return nil, status.Error(codes.NotFound, "Targetpath not found")
-	//	} else {
-	//		return nil, status.Error(codes.Internal, err.Error())
-	//	}
-	//}
-	//if notMnt {
-	//	return nil, status.Error(codes.NotFound, "Volume not mounted")
-	//}
-	//
-	//err = mount.CleanupMountPoint(req.GetTargetPath(), mount.New(""), false)
-	//if err != nil {
-	//	return nil, status.Error(codes.Internal, err.Error())
-	//}
+	targetPath := req.GetTargetPath()
+	volumeID := req.GetVolumeId()
+	body := makeNodeVolumeRequestBody(targetPath)
+	path := fmt.Sprintf("/volumes/%s/umount", volumeID)
+
+	if err := sendRequest(httpMethodPost, ns.managerURL, path, body, nil); err != nil {
+		return &csi.NodeUnpublishVolumeResponse{}, err
+	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func makeNodeVolumeRequestBody(targetPath string) map[string]interface{} {
+	return map[string]interface{}{
+		"targetPath": targetPath,
+	}
 }
 
 func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {

@@ -22,10 +22,11 @@ import (
 )
 
 type driver struct {
-	name     string
-	nodeID   string
-	endpoint string
-	version  string
+	name       string
+	nodeID     string
+	endpoint   string
+	version    string
+	managerURL string
 
 	ids *identityServer
 	ns  *nodeServer
@@ -43,31 +44,26 @@ var (
 	version = "1.0.0"
 )
 
-func NewDriver(nodeID, endpoint string) *driver {
+func NewDriver(nodeID, endpoint, managerURL string) *driver {
 	glog.Infof("Driver: %v version: %v", driverName, version)
 
 	d := &driver{
-		name:     driverName,
-		nodeID:   nodeID,
-		endpoint: endpoint,
-		version:  version,
+		name:       driverName,
+		nodeID:     nodeID,
+		endpoint:   endpoint,
+		version:    version,
+		managerURL: managerURL,
 	}
 
 	return d
 }
 
-func NewNodeServer(nodeID, version string) *nodeServer {
-	return &nodeServer{
-		nodeID: nodeID,
-	}
-}
-
 func (d *driver) Run() {
 	s := NewNonBlockingGRPCServer()
 
-	d.ns = NewNodeServer(d.name, d.version)
+	d.ns = NewNodeServer(d.name, d.version, d.managerURL)
 	d.ids = NewIdentityServer(d.name, d.version)
-	d.cs = NewControllerServer(d.nodeID)
+	d.cs = NewControllerServer(d.nodeID, d.managerURL)
 
 	s.Start(d.endpoint, d.ids, d.cs, d.ns)
 	s.Wait()

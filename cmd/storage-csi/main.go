@@ -24,8 +24,9 @@ import (
 )
 
 var (
-	endpoint string
-	nodeID   string
+	endpoint   string
+	nodeID     string
+	managerURL string
 )
 
 func init() {
@@ -51,6 +52,9 @@ func main() {
 	cmd.PersistentFlags().StringVar(&endpoint, "endpoint", "", "CSI endpoint")
 	cmd.MarkPersistentFlagRequired("endpoint")
 
+	cmd.PersistentFlags().StringVar(&managerURL, "manager-url", "http://127.0.0.1:8800", "master url")
+	cmd.MarkPersistentFlagRequired("endpoint")
+
 	cmd.ParseFlags(os.Args[1:])
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err.Error())
@@ -61,6 +65,6 @@ func main() {
 }
 
 func handle() {
-	d := core.NewDriver(nodeID, endpoint)
+	d := core.NewDriver(nodeID, endpoint, managerURL)
 	d.Run()
 }
